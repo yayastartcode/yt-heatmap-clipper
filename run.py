@@ -7,6 +7,8 @@ import requests
 import shutil
 from urllib.parse import urlparse, parse_qs
 import warnings
+
+sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings("ignore")
 
 OUTPUT_DIR = "clips"      # Directory where generated clips will be saved
