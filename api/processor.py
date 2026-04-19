@@ -91,32 +91,73 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
             )
             
             if not heatmap_data:
-                raise Exception("No heatmap data found for this video")
+                # Fallback: try transcript, then even split
+                print(f"No heatmap data, trying even split for {video_id}")
+                clip_dur = min(60, total_duration / max(max_clips, 1))
+                heatmap_data = []
+                for i in range(min(max_clips, max(1, int(total_duration / clip_dur)))):
+                    heatmap_data.append({
+                        "start": i * clip_dur,
+                        "duration": min(clip_dur, total_duration - i * clip_dur),
+                        "score": 0.5
+                    })
             
             segments = heatmap_data[:max_clips]
         
         elif clip_mode == "transcript":
-            # Transcript-based AI detection
+            # Transcript-based AI detection with fallback to heatmap
+            await job_manager.update_job(job_id, {
+                "current_stage": "fetching_captions",
+                "progress": 12.0
+            })
+            
             captions = await asyncio.to_thread(fetch_captions, video_id)
             
-            if not captions:
-                raise Exception("No captions available for this video")
-            
-            transcript_clips = await asyncio.to_thread(
-                analyze_transcript_for_clips,
-                captions,
-                max_clips,
-                whisper_language
-            )
+            if captions:
+                await job_manager.update_job(job_id, {
+                    "current_stage": "analyzing_transcript",
+                    "progress": 15.0
+                })
+                
+                transcript_clips = await asyncio.to_thread(
+                    analyze_transcript_for_clips,
+                    captions,
+                    max_clips,
+                    whisper_language
+                )
+            else:
+                transcript_clips = None
             
             if not transcript_clips:
-                raise Exception("Could not find interesting moments in transcript")
-            
-            # Convert transcript clips to segment format
-            segments = [
-                {
-                    "start": clip["start"],
-                    "duration": clip["duration"],
+                # Fallback to heatmap
+                print(f"Transcript analysis failed, falling back to heatmap for {video_id}")
+                await job_manager.update_job(job_id, {
+                    "current_stage": "fallback_heatmap",
+                    "progress": 15.0
+                })
+                heatmap_data = await asyncio.to_thread(
+                    extract_heatmap_data, video_id, min_score
+                )
+                if heatmap_data:
+                    segments = heatmap_data[:max_clips]
+                else:
+                    # Last resort: even split
+                    print(f"Heatmap also failed, using even split for {video_id}")
+                    clip_dur = min(60, total_duration / max(max_clips, 1))
+                    segments = []
+                    for i in range(min(max_clips, max(1, int(total_duration / clip_dur)))):
+                        segments.append({
+                            "start": i * clip_dur,
+                            "duration": min(clip_dur, total_duration - i * clip_dur),
+                            "score": 0.5,
+                            "reason": f"Auto-split part {i+1}"
+                        })
+            else:
+                # Convert transcript clips to segment format
+                segments = [
+                    {
+                        "start": clip["start"],
+                        "duration": clip["duration"],
                     "score": clip["score"],
                     "reason": clip.get("reason", "Interesting moment")
                 }

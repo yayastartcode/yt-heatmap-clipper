@@ -228,8 +228,8 @@ async def cancel_job(job_id: str):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    if job["status"] not in ["queued", "processing"]:
-        raise HTTPException(status_code=400, detail="Job is not running")
+    if job["status"] in ["completed", "cancelled"]:
+        return {"message": f"Job already {job['status']}", "status": job["status"]}
     
     # Update job status
     job["status"] = "cancelled"
