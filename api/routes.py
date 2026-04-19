@@ -101,7 +101,7 @@ async def get_job_status(job_id: str):
     return JobStatusResponse(
         job_id=job["job_id"],
         status=job["status"],
-        progress=job["progress"],
+        progress=min(job["progress"], 100.0),
         clips_done=job["clips_done"],
         total_clips=job["total_clips"],
         current_stage=job["current_stage"],

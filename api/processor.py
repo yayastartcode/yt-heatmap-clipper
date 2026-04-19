@@ -186,7 +186,9 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
         
         # Stage 3: Process each clip
         for idx, segment in enumerate(segments, 1):
-            clip_progress = 20.0 + (70.0 * idx / total_clips)
+            # Calculate progress per clip (20% to 95% range)
+            clip_base = 20.0 + (75.0 * (idx - 1) / total_clips)
+            clip_step = 75.0 / total_clips
             
             start = max(0, segment["start"] - config.PADDING)
             end = min(segment["start"] + segment["duration"] + config.PADDING, total_duration)
@@ -196,11 +198,12 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
             
             temp_file = f"temp/temp_{job_id}_{idx}.mp4"
             cropped_file = os.path.join("clips", f"{job_id}_clip_{idx}.mp4")
+            final_file = cropped_file  # May change if subtitle is burned
             
             # Download segment
             await job_manager.update_job(job_id, {
                 "current_stage": f"downloading_clip_{idx}",
-                "progress": clip_progress
+                "progress": min(clip_base, 95.0)
             })
             
             dl_success = await asyncio.to_thread(
@@ -218,7 +221,7 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
             # Process clip (crop to vertical)
             await job_manager.update_job(job_id, {
                 "current_stage": f"processing_clip_{idx}",
-                "progress": clip_progress + 10
+                "progress": min(clip_base + clip_step * 0.3, 95.0)
             })
             
             proc_success = await asyncio.to_thread(
@@ -236,12 +239,12 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
                 print(f"Processing failed for clip {idx}")
                 continue
             
-            # Generate subtitle if requested
+            # Generate subtitle and burn into video if requested
             subtitle_file = None
             if use_subtitle:
                 await job_manager.update_job(job_id, {
                     "current_stage": f"generating_subtitle_{idx}",
-                    "progress": clip_progress + 20
+                    "progress": min(clip_base + clip_step * 0.6, 95.0)
                 })
                 
                 try:
@@ -253,8 +256,21 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
                         whisper_model,
                         whisper_language
                     )
-                    if sub_success:
+                    if sub_success and os.path.exists(srt_file):
                         subtitle_file = srt_file
+                        # Burn subtitle into video
+                        await job_manager.update_job(job_id, {
+                            "current_stage": f"burning_subtitle_{idx}",
+                            "progress": min(clip_base + clip_step * 0.8, 95.0)
+                        })
+                        subtitled_file = cropped_file.replace(".mp4", "_sub.mp4")
+                        burn_success = await asyncio.to_thread(
+                            _burn_subtitle, cropped_file, srt_file, subtitled_file
+                        )
+                        if burn_success and os.path.exists(subtitled_file):
+                            # Replace original with subtitled version
+                            os.remove(cropped_file)
+                            os.rename(subtitled_file, cropped_file)
                 except Exception as e:
                     print(f"Subtitle failed for clip {idx}: {e}")
             
@@ -302,6 +318,33 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
             "error": str(e),
             "progress": 0.0
         })
+
+
+def _burn_subtitle(video_file: str, srt_file: str, output_file: str) -> bool:
+    """
+    Burn SRT subtitle into video using FFmpeg.
+    White text, black outline, positioned at bottom.
+    """
+    import subprocess
+    try:
+        # Escape path for FFmpeg subtitle filter
+        abs_srt = os.path.abspath(srt_file)
+        srt_escaped = abs_srt.replace("\\", "/").replace(":", "\\:")
+        
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", video_file,
+            "-vf", f"subtitles='{srt_escaped}':force_style='FontName=Arial,FontSize=14,Bold=1,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=1,Outline=3,Shadow=2,MarginV=30'",
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
+            "-c:a", "copy",
+            output_file
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return result.returncode == 0 and os.path.exists(output_file)
+    except Exception as e:
+        print(f"Burn subtitle error: {e}")
+        return False
 
 
 async def _stub_process_video(job_id: str, job_data: Dict[str, Any]):

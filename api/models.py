@@ -91,7 +91,7 @@ class JobStatusResponse(BaseModel):
     """Job status response"""
     job_id: str
     status: JobStatus
-    progress: float = Field(default=0.0, ge=0.0, le=100.0)
+    progress: float = Field(default=0.0, ge=0.0)
     clips_done: int = Field(default=0)
     total_clips: int = Field(default=0)
     current_stage: Optional[str] = None
