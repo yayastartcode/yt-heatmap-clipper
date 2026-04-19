@@ -6,23 +6,23 @@ export default function Layout({ children }) {
   const isActive = (path) => location.pathname === path;
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <nav className="bg-dark-card border-b border-dark-border">
+    <div className="min-h-screen flex flex-col bg-slate-900">
+      <nav className="bg-slate-800/50 backdrop-blur border-b border-slate-700/50">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
-            <Link to="/" className="text-2xl font-bold bg-gradient-to-r from-accent-blue to-accent-purple bg-clip-text text-transparent">
+            <Link to="/" className="text-2xl font-bold bg-gradient-to-r from-blue-500 to-purple-500 bg-clip-text text-transparent">
               YT Heatmap Clipper
             </Link>
             <div className="flex gap-6">
               <Link 
                 to="/" 
-                className={`hover:text-accent-blue transition ${isActive('/') ? 'text-accent-blue' : 'text-gray-400'}`}
+                className={`hover:text-blue-400 transition-colors ${isActive('/') ? 'text-blue-400' : 'text-slate-400'}`}
               >
                 Home
               </Link>
               <Link 
                 to="/history" 
-                className={`hover:text-accent-blue transition ${isActive('/history') ? 'text-accent-blue' : 'text-gray-400'}`}
+                className={`hover:text-blue-400 transition-colors ${isActive('/history') ? 'text-blue-400' : 'text-slate-400'}`}
               >
                 History
               </Link>
@@ -35,8 +35,8 @@ export default function Layout({ children }) {
         {children}
       </main>
 
-      <footer className="bg-dark-card border-t border-dark-border py-6">
-        <div className="container mx-auto px-4 text-center text-gray-400 text-sm">
+      <footer className="bg-slate-800/50 backdrop-blur border-t border-slate-700/50 py-6">
+        <div className="container mx-auto px-4 text-center text-slate-400 text-sm">
           <p>YT Heatmap Clipper - Extract viral moments from YouTube videos</p>
         </div>
       </footer>

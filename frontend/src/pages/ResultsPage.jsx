@@ -40,8 +40,8 @@ export default function ResultsPage() {
   if (loading) {
     return (
       <div className="max-w-6xl mx-auto text-center py-20">
-        <div className="animate-spin w-12 h-12 border-4 border-accent-blue border-t-transparent rounded-full mx-auto mb-4" />
-        <p className="text-gray-400">Loading clips...</p>
+        <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-slate-400">Loading clips...</p>
       </div>
     );
   }
@@ -50,11 +50,11 @@ export default function ResultsPage() {
     return (
       <div className="max-w-6xl mx-auto text-center py-20 space-y-4">
         <div className="text-6xl mb-4">😕</div>
-        <h2 className="text-2xl font-bold">No clips found</h2>
-        <p className="text-gray-400">The video might not have enough engagement data</p>
+        <h2 className="text-2xl font-bold text-white">No clips found</h2>
+        <p className="text-slate-400">The video might not have enough engagement data</p>
         <button
           onClick={() => navigate('/')}
-          className="px-6 py-3 bg-accent-blue hover:bg-blue-600 rounded-lg font-medium transition"
+          className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-xl font-medium transition-all shadow-lg"
         >
           Try Another Video
         </button>
@@ -64,21 +64,21 @@ export default function ResultsPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h1 className="text-3xl font-bold mb-2">Generated Clips</h1>
-          <p className="text-gray-400">{clips.length} viral moments extracted</p>
+          <h1 className="text-3xl font-bold mb-2 text-white">Generated Clips</h1>
+          <p className="text-slate-400">{clips.length} viral moments extracted</p>
         </div>
         <div className="flex gap-3">
           <button
             onClick={handleShare}
-            className="px-6 py-3 bg-dark-card border border-dark-border hover:border-gray-500 rounded-lg font-medium transition"
+            className="px-6 py-3 bg-slate-800/50 border border-slate-700/50 hover:border-slate-600 rounded-xl font-medium transition-all backdrop-blur"
           >
             Share
           </button>
           <button
             onClick={handleDownloadAll}
-            className="px-6 py-3 bg-gradient-to-r from-accent-blue to-accent-purple hover:opacity-90 rounded-lg font-medium transition"
+            className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-xl font-medium transition-all shadow-lg"
           >
             Download All (ZIP)
           </button>
@@ -98,7 +98,7 @@ export default function ResultsPage() {
       <div className="flex justify-center">
         <button
           onClick={() => navigate('/')}
-          className="px-8 py-3 bg-dark-card border border-dark-border hover:border-gray-500 rounded-lg font-medium transition"
+          className="px-8 py-3 bg-slate-800/50 border border-slate-700/50 hover:border-slate-600 rounded-xl font-medium transition-all backdrop-blur"
         >
           Process Another Video
         </button>

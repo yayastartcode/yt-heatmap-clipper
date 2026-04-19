@@ -43,12 +43,12 @@ export default function URLInput({ onUrlsChange, urls = [] }) {
           onPaste={handlePaste}
           onKeyPress={handleKeyPress}
           placeholder="Paste YouTube URL here..."
-          className="flex-1 px-4 py-3 bg-dark-card border border-dark-border rounded-lg focus:outline-none focus:border-accent-blue transition"
+          className="flex-1 px-4 py-3 bg-slate-800 border border-slate-700 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all text-white placeholder-slate-500"
         />
         <button
           onClick={handleAdd}
           disabled={!inputValue.trim() || !isValidYouTubeUrl(inputValue)}
-          className="px-6 py-3 bg-accent-blue hover:bg-blue-600 disabled:bg-gray-600 disabled:cursor-not-allowed rounded-lg font-medium transition"
+          className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 disabled:from-slate-700 disabled:to-slate-700 disabled:cursor-not-allowed rounded-xl font-medium transition-all"
         >
           Add URL
         </button>
@@ -59,12 +59,12 @@ export default function URLInput({ onUrlsChange, urls = [] }) {
           {urls.map((url, index) => (
             <div
               key={index}
-              className="flex items-center gap-2 px-3 py-2 bg-dark-card border border-dark-border rounded-lg"
+              className="flex items-center gap-2 px-3 py-2 bg-slate-800/50 border border-slate-700/50 rounded-lg backdrop-blur"
             >
-              <span className="text-sm text-gray-300 truncate max-w-xs">{url}</span>
+              <span className="text-sm text-slate-300 truncate max-w-xs">{url}</span>
               <button
                 onClick={() => handleRemove(url)}
-                className="text-red-400 hover:text-red-300 transition"
+                className="text-red-400 hover:text-red-300 transition-colors"
               >
                 ✕
               </button>

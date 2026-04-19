@@ -54,8 +54,8 @@ export default function HistoryPage() {
   if (loading) {
     return (
       <div className="max-w-4xl mx-auto text-center py-20">
-        <div className="animate-spin w-12 h-12 border-4 border-accent-blue border-t-transparent rounded-full mx-auto mb-4" />
-        <p className="text-gray-400">Loading history...</p>
+        <div className="animate-spin w-12 h-12 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4" />
+        <p className="text-slate-400">Loading history...</p>
       </div>
     );
   }
@@ -64,11 +64,11 @@ export default function HistoryPage() {
     return (
       <div className="max-w-4xl mx-auto text-center py-20 space-y-4">
         <div className="text-6xl mb-4">📋</div>
-        <h2 className="text-2xl font-bold">No History Yet</h2>
-        <p className="text-gray-400">Process your first video to see it here</p>
+        <h2 className="text-2xl font-bold text-white">No History Yet</h2>
+        <p className="text-slate-400">Process your first video to see it here</p>
         <button
           onClick={() => navigate('/')}
-          className="px-6 py-3 bg-accent-blue hover:bg-blue-600 rounded-lg font-medium transition"
+          className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-xl font-medium transition-all shadow-lg"
         >
           Get Started
         </button>
@@ -79,10 +79,10 @@ export default function HistoryPage() {
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Processing History</h1>
+        <h1 className="text-3xl font-bold text-white">Processing History</h1>
         <button
           onClick={() => navigate('/')}
-          className="px-6 py-3 bg-accent-blue hover:bg-blue-600 rounded-lg font-medium transition"
+          className="px-6 py-3 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-xl font-medium transition-all shadow-lg"
         >
           New Job
         </button>
@@ -92,22 +92,22 @@ export default function HistoryPage() {
         {jobs.map((job) => (
           <div
             key={job.id}
-            className="bg-dark-card border border-dark-border rounded-xl p-6 hover:border-gray-500 transition"
+            className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-2xl p-6 hover:border-slate-600 transition-all"
           >
             <div className="flex items-start justify-between mb-4">
               <div className="flex-1">
                 <div className="flex items-center gap-3 mb-2">
-                  <h3 className="font-semibold text-lg">{job.title || 'Untitled Job'}</h3>
+                  <h3 className="font-semibold text-lg text-white">{job.title || 'Untitled Job'}</h3>
                   {getStatusBadge(job.status)}
                 </div>
-                <p className="text-sm text-gray-400 mb-1">Job ID: {job.id}</p>
-                <p className="text-sm text-gray-400">
+                <p className="text-sm text-slate-400 mb-1">Job ID: {job.id}</p>
+                <p className="text-sm text-slate-400">
                   Created: {new Date(job.createdAt).toLocaleString()}
                 </p>
               </div>
               <button
                 onClick={() => handleDelete(job.id)}
-                className="text-red-400 hover:text-red-300 transition"
+                className="text-red-400 hover:text-red-300 transition-colors"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -117,10 +117,10 @@ export default function HistoryPage() {
 
             {job.urls && job.urls.length > 0 && (
               <div className="mb-4">
-                <p className="text-sm text-gray-500 mb-2">URLs:</p>
+                <p className="text-sm text-slate-500 mb-2">URLs:</p>
                 <div className="space-y-1">
                   {job.urls.map((url, i) => (
-                    <p key={i} className="text-sm text-gray-400 truncate">{url}</p>
+                    <p key={i} className="text-sm text-slate-400 truncate">{url}</p>
                   ))}
                 </div>
               </div>
@@ -130,7 +130,7 @@ export default function HistoryPage() {
               {job.status === 'completed' && (
                 <button
                   onClick={() => navigate(`/results/${job.id}`)}
-                  className="px-4 py-2 bg-accent-blue hover:bg-blue-600 rounded-lg text-sm font-medium transition"
+                  className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-xl text-sm font-medium transition-all shadow-lg"
                 >
                   View Results
                 </button>
@@ -138,7 +138,7 @@ export default function HistoryPage() {
               {job.status === 'processing' && (
                 <button
                   onClick={() => navigate(`/processing/${job.id}`)}
-                  className="px-4 py-2 bg-accent-blue hover:bg-blue-600 rounded-lg text-sm font-medium transition"
+                  className="px-4 py-2 bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 rounded-xl text-sm font-medium transition-all shadow-lg"
                 >
                   View Progress
                 </button>
@@ -146,7 +146,7 @@ export default function HistoryPage() {
               {job.status === 'failed' && (
                 <button
                   onClick={() => navigate('/')}
-                  className="px-4 py-2 bg-dark-border hover:bg-gray-600 rounded-lg text-sm font-medium transition"
+                  className="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm font-medium transition-all"
                 >
                   Try Again
                 </button>
