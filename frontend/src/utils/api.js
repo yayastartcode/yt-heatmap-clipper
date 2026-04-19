@@ -1,12 +1,35 @@
 const API_BASE = '/api';
 
+// Map frontend crop mode names to API enum values
+const CROP_MODE_MAP = {
+  'center': 'none',
+  'left': 'facecam_left',
+  'right': 'facecam_right',
+};
+
+function buildApiPayload(url, options) {
+  return {
+    url,
+    crop_mode: CROP_MODE_MAP[options.cropMode] || 'none',
+    use_subtitle: options.subtitles ?? true,
+    whisper_model: options.modelSize || 'small',
+    whisper_language: 'id',
+    max_clips: options.maxClips || 10,
+    min_score: options.minScore || 0.4,
+  };
+}
+
 export const processVideo = async (url, options) => {
+  const payload = buildApiPayload(url, options);
   const response = await fetch(`${API_BASE}/process`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url, ...options })
+    body: JSON.stringify(payload)
   });
-  if (!response.ok) throw new Error('Failed to process video');
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to process video');
+  }
   return response.json();
 };
 
@@ -27,11 +50,23 @@ export const downloadClip = (jobId, filename) => {
 };
 
 export const batchProcess = async (urls, options) => {
+  const payload = {
+    urls,
+    crop_mode: CROP_MODE_MAP[options.cropMode] || 'none',
+    use_subtitle: options.subtitles ?? true,
+    whisper_model: options.modelSize || 'small',
+    whisper_language: 'id',
+    max_clips: options.maxClips || 10,
+    min_score: options.minScore || 0.4,
+  };
   const response = await fetch(`${API_BASE}/batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ urls, ...options })
+    body: JSON.stringify(payload)
   });
-  if (!response.ok) throw new Error('Failed to batch process');
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to batch process');
+  }
   return response.json();
 };

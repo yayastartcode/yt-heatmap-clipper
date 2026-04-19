@@ -45,7 +45,9 @@ export default function HomePage() {
       }
 
       toast.success('Processing started!');
-      navigate(`/processing/${result.jobId}`);
+      const jobId = result.job_id || (Array.isArray(result) ? result[0]?.job_id : undefined);
+      if (!jobId) throw new Error('No job ID returned');
+      navigate(`/processing/${jobId}`);
     } catch (error) {
       toast.error(error.message || 'Failed to start processing');
       setProcessing(false);
