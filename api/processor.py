@@ -12,18 +12,18 @@ from api.models import JobStatus
 # These imports will work once Agent 1 completes the core modules
 # For now, we create stub implementations that can be replaced
 try:
-    from core.heatmap import ambil_most_replayed
-    from core.downloader import download_segment
+    from core.heatmap import extract_video_id, extract_heatmap_data, get_video_duration
+    from core.downloader import download_video_segment
     from core.processor import process_clip
     from core.subtitle import generate_subtitle
     from core.thumbnail import extract_thumbnail
-    from core.detector import detect_facecam
-    from core.ai import generate_title_description
+    from core.detector import detect_facecam_position, suggest_crop_mode
+    from core.ai import generate_title, generate_description
     import config
     CORE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     CORE_AVAILABLE = False
-    print("⚠️  Core modules not yet available. Using stub implementation.")
+    print(f"⚠️  Core modules not available: {e}. Using stub implementation.")
 
 
 async def process_video(job_id: str, job_data: Dict[str, Any]):
@@ -51,38 +51,52 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
         
         # Extract parameters
         url = job_data["url"]
-        crop_mode = job_data.get("crop_mode", "none")
+        crop_mode = job_data.get("crop_mode", "default")
         use_subtitle = job_data.get("use_subtitle", True)
         whisper_model = job_data.get("whisper_model", "small")
         whisper_language = job_data.get("whisper_language", "id")
         max_clips = job_data.get("max_clips", 10)
         min_score = job_data.get("min_score", 0.40)
         
-        # Stage 1: Extract heatmap data
+        # Stage 1: Extract video ID and heatmap data
         await job_manager.update_job(job_id, {
             "current_stage": "extracting_heatmap",
             "progress": 10.0
         })
         
+        video_id = extract_video_id(url)
+        if not video_id:
+            raise Exception("Invalid YouTube URL")
+        
         heatmap_data = await asyncio.to_thread(
-            ambil_most_replayed,
-            url,
-            max_clips=max_clips,
-            min_score=min_score
+            extract_heatmap_data,
+            video_id,
+            min_score
         )
         
         if not heatmap_data:
             raise Exception("No heatmap data found for this video")
         
+        # Limit clips
+        heatmap_data = heatmap_data[:max_clips]
         total_clips = len(heatmap_data)
+        
+        total_duration = await asyncio.to_thread(get_video_duration, video_id)
+        
         await job_manager.update_job(job_id, {
             "total_clips": total_clips,
             "progress": 20.0
         })
         
+        import os
+        os.makedirs("clips", exist_ok=True)
+        
         # Stage 2: Process each clip
         for idx, segment in enumerate(heatmap_data, 1):
             clip_progress = 20.0 + (70.0 * idx / total_clips)
+            
+            start = max(0, segment["start"] - config.PADDING)
+            end = min(segment["start"] + segment["duration"] + config.PADDING, total_duration)
             
             # Download segment
             await job_manager.update_job(job_id, {
@@ -91,13 +105,16 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
             })
             
             video_path = await asyncio.to_thread(
-                download_segment,
-                url,
-                segment["start"],
-                segment["end"]
+                download_video_segment,
+                video_id,
+                start,
+                end
             )
             
-            # Process clip (crop, etc.)
+            if not video_path:
+                continue
+            
+            # Process clip (crop)
             await job_manager.update_job(job_id, {
                 "current_stage": f"processing_clip_{idx}",
                 "progress": clip_progress + 10
@@ -107,8 +124,12 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
                 process_clip,
                 video_path,
                 crop_mode=crop_mode,
-                output_dir="clips"
+                output_dir="clips",
+                output_filename=f"clip_{idx}.mp4"
             )
+            
+            if not output_path:
+                continue
             
             # Generate subtitle if requested
             if use_subtitle:
@@ -117,27 +138,32 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
                     "progress": clip_progress + 20
                 })
                 
-                await asyncio.to_thread(
-                    generate_subtitle,
-                    output_path,
-                    model=whisper_model,
-                    language=whisper_language
-                )
+                try:
+                    await asyncio.to_thread(
+                        generate_subtitle,
+                        output_path,
+                        model=whisper_model,
+                        language=whisper_language
+                    )
+                except Exception as e:
+                    print(f"Subtitle failed for clip {idx}: {e}")
             
             # Extract thumbnail
-            thumbnail_path = await asyncio.to_thread(
-                extract_thumbnail,
-                output_path
-            )
+            thumbnail_path = None
+            try:
+                thumbnail_path = await asyncio.to_thread(
+                    extract_thumbnail,
+                    output_path
+                )
+            except Exception as e:
+                print(f"Thumbnail failed for clip {idx}: {e}")
             
             # Generate AI title/description (optional)
             title = None
             description = None
             try:
-                title, description = await asyncio.to_thread(
-                    generate_title_description,
-                    output_path
-                )
+                title = await asyncio.to_thread(generate_title, "")
+                description = await asyncio.to_thread(generate_description, "")
             except Exception as e:
                 print(f"AI title generation failed: {e}")
             
@@ -145,11 +171,11 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
             clip_info = {
                 "filename": Path(output_path).name,
                 "thumbnail": Path(thumbnail_path).name if thumbnail_path else None,
-                "duration": segment["end"] - segment["start"],
+                "duration": end - start,
                 "title": title,
                 "description": description,
                 "start_time": segment["start"],
-                "end_time": segment["end"],
+                "end_time": segment["start"] + segment["duration"],
                 "score": segment["score"]
             }
             
