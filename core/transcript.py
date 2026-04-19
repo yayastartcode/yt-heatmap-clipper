@@ -35,13 +35,17 @@ def fetch_captions(video_id: str, output_dir: str = "temp") -> Optional[List[Dic
         "--skip-download",
         "--sub-format", "json3",
         "--remote-components", "ejs:github",
-        "-o", f"{output_dir}/{video_id}",
-        f"https://youtu.be/{video_id}"
     ]
     
-    # Add cookie file if it exists
-    if os.path.exists(config.COOKIES_FILE):
-        cmd.extend(["--cookies", config.COOKIES_FILE])
+    # Add cookie file BEFORE the URL
+    cookies_path = getattr(config, 'COOKIES_FILE', 'cookies.txt')
+    if os.path.exists(cookies_path):
+        cmd.extend(["--cookies", cookies_path])
+    
+    cmd.extend([
+        "-o", f"{output_dir}/{video_id}",
+        f"https://youtu.be/{video_id}"
+    ])
     
     try:
         result = subprocess.run(
