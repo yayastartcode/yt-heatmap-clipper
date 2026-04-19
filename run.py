@@ -1,514 +1,355 @@
+"""
+YT Heatmap Clipper - Enhanced Version
+Extracts viral moments from YouTube videos using heatmap data
+"""
 import os
-import re
-import json
 import sys
-import subprocess
-import requests
-import shutil
-from urllib.parse import urlparse, parse_qs
 import warnings
+from typing import List, Dict, Optional, Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Configure output encoding
 sys.stdout.reconfigure(encoding='utf-8')
 warnings.filterwarnings("ignore")
 
-OUTPUT_DIR = "clips"      # Directory where generated clips will be saved
-MAX_DURATION = 60         # Maximum duration (in seconds) for each clip
-MIN_SCORE = 0.40          # Minimum heatmap intensity score to be considered viral
-MAX_CLIPS = 10            # Maximum number of clips to generate per video
-MAX_WORKERS = 1           # Number of parallel workers (reserved for future concurrency)
-PADDING = 10              # Extra seconds added before and after each detected segment
-TOP_HEIGHT = 960          # Height for top section (center content) in split mode
-BOTTOM_HEIGHT = 320       # Height for bottom section (facecam) in split mode (Total: 1280px)
-USE_SUBTITLE = True       # Enable auto subtitle using Faster-Whisper (4-5x faster)
-WHISPER_MODEL = "small"   # Whisper model size: tiny, base, small, medium, large
-
-def extract_video_id(url):
-    """
-    Extract the YouTube video ID from a given URL.
-    Supports standard YouTube URLs, shortened URLs, and Shorts URLs.
-    """
-    parsed = urlparse(url)
-
-    if parsed.hostname in ("youtu.be", "www.youtu.be"):
-        return parsed.path[1:]
-
-    if parsed.hostname in ("youtube.com", "www.youtube.com"):
-        if parsed.path == "/watch":
-            return parse_qs(parsed.query).get("v", [None])[0]
-        if parsed.path.startswith("/shorts/"):
-            return parsed.path.split("/")[2]
-
-    return None
+# Import core modules
+import config
+from core import (
+    extract_video_id,
+    extract_heatmap_data,
+    get_video_duration,
+    download_video_segment,
+    process_clip,
+    CropMode,
+    generate_subtitle,
+    extract_thumbnail,
+    detect_facecam_position,
+    suggest_crop_mode,
+    generate_title,
+    generate_description
+)
+from core.downloader import update_ytdlp
+from core.subtitle import check_whisper_installation, install_whisper, get_model_size, is_model_cached
 
 
-def get_model_size(model):
-    """
-    Get the approximate size of a Whisper model.
-    """
-    sizes = {
-        "tiny": "75 MB",
-        "base": "142 MB",
-        "small": "466 MB",
-        "medium": "1.5 GB",
-        "large-v1": "2.9 GB",
-        "large-v2": "2.9 GB",
-        "large-v3": "2.9 GB"
-    }
-    return sizes.get(model, "unknown size")
-
-
-def cek_dependensi(install_whisper=False):
+def check_dependencies(install_whisper_pkg: bool = False):
     """
     Ensure required dependencies are available.
-    Automatically updates yt-dlp and checks FFmpeg availability.
     """
-    subprocess.run(
-        [sys.executable, "-m", "pip", "install", "-U", "yt-dlp"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    # Update yt-dlp
+    print("Checking dependencies...")
+    update_ytdlp()
+    
+    if install_whisper_pkg:
+        if not check_whisper_installation():
+            print("📦 Installing Faster-Whisper package...")
+            if install_whisper():
+                print("✅ Faster-Whisper installed successfully.")
+            else:
+                print("❌ Failed to install Faster-Whisper.")
+                return False
+        else:
+            print("✅ Faster-Whisper package installed.")
+        
+        # Check model cache
+        if is_model_cached(config.WHISPER_MODEL):
+            print(f"✅ Model '{config.WHISPER_MODEL}' already cached.\n")
+        else:
+            print(f"⚠️  Model '{config.WHISPER_MODEL}' not cached.")
+            print(f"   📥 Will download ~{get_model_size(config.WHISPER_MODEL)} on first use.\n")
+    
+    # Check FFmpeg
+    import shutil
+    if not shutil.which("ffmpeg"):
+        print("❌ FFmpeg not found. Please install FFmpeg.")
+        return False
+    
+    return True
 
-    if install_whisper:
-        # Check if faster-whisper package is installed
-        try:
-            import faster_whisper
-            print(f"✅ Faster-Whisper package installed.")
-            
-            # Check if selected model is cached
-            cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-            model_name = f"faster-whisper-{WHISPER_MODEL}"
-            
-            model_cached = False
-            if os.path.exists(cache_dir):
+
+def process_single_clip(
+    video_id: str,
+    segment: Dict,
+    index: int,
+    total_duration: float,
+    crop_mode: CropMode,
+    use_subtitle: bool,
+    progress_callback: Optional[Callable] = None
+) -> bool:
+    """
+    Process a single clip from start to finish.
+    
+    Args:
+        video_id: YouTube video ID
+        segment: Heatmap segment dict
+        index: Clip index number
+        total_duration: Total video duration
+        crop_mode: Crop mode to use
+        use_subtitle: Whether to generate subtitle
+        progress_callback: Optional progress callback
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    start_original = segment["start"]
+    end_original = segment["start"] + segment["duration"]
+    
+    # Add padding
+    start = max(0, start_original - config.PADDING)
+    end = min(end_original + config.PADDING, total_duration)
+    
+    if end - start < 3:
+        return False
+    
+    # File paths
+    temp_file = os.path.join(config.TEMP_DIR, f"temp_{index}.mp4")
+    subtitle_file = os.path.join(config.TEMP_DIR, f"temp_{index}.srt") if use_subtitle else None
+    output_file = os.path.join(config.OUTPUT_DIR, f"clip_{index}.mp4")
+    thumbnail_file = os.path.join(config.OUTPUT_DIR, f"clip_{index}_thumb.jpg")
+    
+    print(f"\n[Clip {index}] Processing segment ({int(start)}s - {int(end)}s)")
+    
+    try:
+        # Step 1: Download segment
+        print("  Downloading segment...")
+        if not download_video_segment(video_id, start, end, temp_file, progress_callback):
+            return False
+        
+        # Step 2: Generate subtitle if enabled
+        if use_subtitle:
+            print("  Generating subtitle...")
+            if not generate_subtitle(temp_file, subtitle_file, progress_callback=progress_callback):
+                print("  ⚠️  Subtitle generation failed, continuing without subtitle...")
+                subtitle_file = None
+        
+        # Step 3: Process video (crop, subtitle, effects)
+        print("  Processing video...")
+        if not process_clip(
+            temp_file,
+            output_file,
+            crop_mode,
+            subtitle_file,
+            progress_callback=progress_callback
+        ):
+            return False
+        
+        # Step 4: Extract thumbnail
+        if config.THUMBNAIL_ENABLED:
+            print("  Extracting thumbnail...")
+            extract_thumbnail(output_file, thumbnail_file, progress_callback=progress_callback)
+        
+        # Cleanup temp files
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+        if subtitle_file and os.path.exists(subtitle_file):
+            os.remove(subtitle_file)
+        
+        print(f"✅ Clip {index} completed successfully.")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Failed to process clip {index}: {str(e)}")
+        
+        # Cleanup
+        for f in [temp_file, subtitle_file]:
+            if f and os.path.exists(f):
                 try:
-                    cached_items = os.listdir(cache_dir)
-                    model_cached = any(model_name in item.lower() for item in cached_items)
+                    os.remove(f)
                 except Exception:
                     pass
+        
+        return False
+
+
+def process_video(
+    url: str,
+    crop_mode: CropMode = CropMode.DEFAULT,
+    use_subtitle: bool = False,
+    max_clips: int = None,
+    parallel: bool = False
+) -> int:
+    """
+    Process a YouTube video and generate clips.
+    
+    Args:
+        url: YouTube video URL
+        crop_mode: Crop mode to use
+        use_subtitle: Whether to generate subtitles
+        max_clips: Maximum number of clips (defaults to config.MAX_CLIPS)
+        parallel: Whether to process clips in parallel
+        
+    Returns:
+        Number of successfully generated clips
+    """
+    if max_clips is None:
+        max_clips = config.MAX_CLIPS
+    
+    # Extract video ID
+    video_id = extract_video_id(url)
+    if not video_id:
+        print("❌ Invalid YouTube URL.")
+        return 0
+    
+    print(f"\n📹 Video ID: {video_id}")
+    
+    # Get heatmap data
+    print("📊 Fetching heatmap data...")
+    heatmap_segments = extract_heatmap_data(video_id)
+    
+    if not heatmap_segments:
+        print("❌ No high-engagement segments found.")
+        return 0
+    
+    print(f"✅ Found {len(heatmap_segments)} high-engagement segments.")
+    
+    # Get video duration
+    total_duration = get_video_duration(video_id)
+    print(f"⏱️  Video duration: {int(total_duration)}s")
+    
+    # Create output directories
+    os.makedirs(config.OUTPUT_DIR, exist_ok=True)
+    os.makedirs(config.TEMP_DIR, exist_ok=True)
+    
+    # Limit to max clips
+    segments_to_process = heatmap_segments[:max_clips]
+    
+    print(f"\n🎬 Processing {len(segments_to_process)} clips...")
+    print(f"   Crop mode: {crop_mode.value}")
+    print(f"   Subtitle: {'Enabled' if use_subtitle else 'Disabled'}")
+    print(f"   Parallel: {'Enabled' if parallel else 'Disabled'}")
+    
+    success_count = 0
+    
+    if parallel and config.PARALLEL_WORKERS > 1:
+        # Parallel processing
+        with ThreadPoolExecutor(max_workers=config.PARALLEL_WORKERS) as executor:
+            futures = []
             
-            if model_cached:
-                print(f"✅ Model '{WHISPER_MODEL}' already cached and ready.\n")
-            else:
-                print(f"⚠️  Model '{WHISPER_MODEL}' not found in cache.")
-                print(f"   📥 Will auto-download ~{get_model_size(WHISPER_MODEL)} on first transcribe.")
-                print(f"   ⏱️  Download happens only once, then cached for future use.\n")
-                
-        except ImportError:
-            print("📦 Installing Faster-Whisper package...")
-            subprocess.run(
-                [sys.executable, "-m", "pip", "install", "faster-whisper"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print(f"✅ Faster-Whisper package installed successfully.")
-            print(f"⚠️  Model '{WHISPER_MODEL}' (~{get_model_size(WHISPER_MODEL)}) will be downloaded on first use.\n")
+            for i, segment in enumerate(segments_to_process, start=1):
+                future = executor.submit(
+                    process_single_clip,
+                    video_id,
+                    segment,
+                    i,
+                    total_duration,
+                    crop_mode,
+                    use_subtitle
+                )
+                futures.append(future)
+            
+            for future in as_completed(futures):
+                if future.result():
+                    success_count += 1
+    else:
+        # Sequential processing
+        for i, segment in enumerate(segments_to_process, start=1):
+            if process_single_clip(
+                video_id,
+                segment,
+                i,
+                total_duration,
+                crop_mode,
+                use_subtitle
+            ):
+                success_count += 1
+    
+    return success_count
 
-    if not shutil.which("ffmpeg"):
-        print("FFmpeg not found. Please install FFmpeg and ensure it is in PATH.")
-        sys.exit(1)
 
-
-def ambil_most_replayed(video_id):
+def batch_process(
+    urls: List[str],
+    crop_mode: CropMode = CropMode.DEFAULT,
+    use_subtitle: bool = False,
+    max_clips_per_video: int = None
+) -> Dict[str, int]:
     """
-    Fetch and parse YouTube 'Most Replayed' heatmap data.
-    Returns a list of high-engagement segments.
+    Process multiple YouTube videos.
+    
+    Args:
+        urls: List of YouTube URLs
+        crop_mode: Crop mode to use
+        use_subtitle: Whether to generate subtitles
+        max_clips_per_video: Max clips per video
+        
+    Returns:
+        Dict mapping URL to number of clips generated
     """
-    url = f"https://www.youtube.com/watch?v={video_id}"
-    headers = {"User-Agent": "Mozilla/5.0"}
-
-    print("Reading YouTube heatmap data...")
-
-    try:
-        html = requests.get(url, headers=headers, timeout=20).text
-    except Exception:
-        return []
-
-    match = re.search(
-        r'"markers":\s*(\[.*?\])\s*,\s*"?markersMetadata"?',
-        html,
-        re.DOTALL
-    )
-
-    if not match:
-        return []
-
-    try:
-        markers = json.loads(match.group(1).replace('\\"', '"'))
-    except Exception:
-        return []
-
-    results = []
-
-    for marker in markers:
-        if "heatMarkerRenderer" in marker:
-            marker = marker["heatMarkerRenderer"]
-
-        try:
-            score = float(marker.get("intensityScoreNormalized", 0))
-            if score >= MIN_SCORE:
-                results.append({
-                    "start": float(marker["startMillis"]) / 1000,
-                    "duration": min(
-                        float(marker["durationMillis"]) / 1000,
-                        MAX_DURATION
-                    ),
-                    "score": score
-                })
-        except Exception:
-            continue
-
-    results.sort(key=lambda x: x["score"], reverse=True)
+    results = {}
+    
+    print(f"\n📦 Batch processing {len(urls)} videos...")
+    
+    for i, url in enumerate(urls, start=1):
+        print(f"\n{'='*60}")
+        print(f"Processing video {i}/{len(urls)}: {url}")
+        print('='*60)
+        
+        count = process_video(url, crop_mode, use_subtitle, max_clips_per_video)
+        results[url] = count
+    
     return results
 
 
-def get_duration(video_id):
+def interactive_mode():
     """
-    Retrieve the total duration of a YouTube video in seconds.
+    Interactive CLI mode (original behavior).
     """
-    cmd = [
-        sys.executable,
-        "-m",
-        "yt_dlp",
-        "--get-duration",
-        f"https://youtu.be/{video_id}"
-    ]
-
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True)
-        time_parts = res.stdout.strip().split(":")
-
-        if len(time_parts) == 2:
-            return int(time_parts[0]) * 60 + int(time_parts[1])
-        if len(time_parts) == 3:
-            return (
-                int(time_parts[0]) * 3600 +
-                int(time_parts[1]) * 60 +
-                int(time_parts[2])
-            )
-    except Exception:
-        pass
-
-    return 3600
-
-
-def generate_subtitle(video_file, subtitle_file):
-    """
-    Generate subtitle file using Faster-Whisper for the given video.
-    Returns True if successful, False otherwise.
-    """
-    try:
-        from faster_whisper import WhisperModel
-        
-        print(f"  Loading Faster-Whisper model '{WHISPER_MODEL}'...")
-        print(f"  (If this is first time, downloading ~{get_model_size(WHISPER_MODEL)}...)")
-        # Use int8 for CPU efficiency, or "float16" for GPU
-        model = WhisperModel(WHISPER_MODEL, device="cpu", compute_type="int8")
-        
-        print("  ✅ Model loaded. Transcribing audio (4-5x faster than standard Whisper)...")
-        segments, info = model.transcribe(video_file, language="id")
-        
-        # Generate SRT format
-        print("  Generating subtitle file...")
-        with open(subtitle_file, "w", encoding="utf-8") as f:
-            for i, segment in enumerate(segments, start=1):
-                start_time = format_timestamp(segment.start)
-                end_time = format_timestamp(segment.end)
-                text = segment.text.strip()
-                
-                f.write(f"{i}\n")
-                f.write(f"{start_time} --> {end_time}\n")
-                f.write(f"{text}\n\n")
-        
-        return True
-    except Exception as e:
-        print(f"  Failed to generate subtitle: {str(e)}")
-        return False
-
-
-def format_timestamp(seconds):
-    """
-    Convert seconds to SRT timestamp format (HH:MM:SS,mmm)
-    """
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int((seconds % 1) * 1000)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
-
-
-def proses_satu_clip(video_id, item, index, total_duration, crop_mode="default", use_subtitle=False):
-    """
-    Download, crop, and export a single vertical clip
-    based on a heatmap segment.
+    print("\n" + "="*60)
+    print("YT Heatmap Clipper - Enhanced Version")
+    print("="*60)
     
-    Args:
-        crop_mode: "default", "split_left", or "split_right"
-        use_subtitle: whether to generate and burn subtitle
-    """
-    start_original = item["start"]
-    end_original = item["start"] + item["duration"]
-
-    start = max(0, start_original - PADDING)
-    end = min(end_original + PADDING, total_duration)
-
-    if end - start < 3:
-        return False
-
-    temp_file = f"temp_{index}.mp4"
-    cropped_file = f"temp_cropped_{index}.mp4"
-    subtitle_file = f"temp_{index}.srt"
-    output_file = os.path.join(OUTPUT_DIR, f"clip_{index}.mp4")
-
-    print(
-        f"[Clip {index}] Processing segment "
-        f"({int(start)}s - {int(end)}s, padding {PADDING}s)"
-    )
-
-    cmd_download = [
-        sys.executable, "-m", "yt_dlp",
-        "--force-ipv4",
-        "--quiet", "--no-warnings",
-        "--downloader", "ffmpeg",
-        "--downloader-args",
-        f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
-        "-f",
-        "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
-        "-o", temp_file,
-        f"https://youtu.be/{video_id}"
-    ]
-
-    try:
-        result = subprocess.run(
-            cmd_download,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-
-        if not os.path.exists(temp_file):
-            print("Failed to download video segment.")
-            return False
-
-        # Build video filter based on crop_mode
-        # First, crop the video to cropped_file
-        if crop_mode == "default":
-            # Standard center crop - ambil dari tengah video
-            cmd_crop = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", temp_file,
-                "-vf", "scale=-2:1280,crop=720:1280:(iw-720)/2:(ih-1280)/2",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                "-c:a", "aac", "-b:a", "128k",
-                cropped_file
-            ]
-        elif crop_mode == "split_left":
-            # Split crop: 
-            # - Top: konten game dari tengah-tengah video (960px)
-            # - Bottom: facecam dari kiri bawah video asli (320px)
-            vf = (
-                f"scale=-2:1280[scaled];"
-                f"[scaled]split=2[s1][s2];"
-                f"[s1]crop=720:{TOP_HEIGHT}:(iw-720)/2:(ih-1280)/2[top];"
-                f"[s2]crop=720:{BOTTOM_HEIGHT}:0:ih-{BOTTOM_HEIGHT}[bottom];"
-                f"[top][bottom]vstack=inputs=2[out]"
-            )
-            cmd_crop = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", temp_file,
-                "-filter_complex", vf,
-                "-map", "[out]", "-map", "0:a?",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                "-c:a", "aac", "-b:a", "128k",
-                cropped_file
-            ]
-        elif crop_mode == "split_right":
-            # Split crop: 
-            # - Top: konten game dari tengah-tengah video (960px)
-            # - Bottom: facecam dari kanan bawah video asli (320px)
-            vf = (
-                f"scale=-2:1280[scaled];"
-                f"[scaled]split=2[s1][s2];"
-                f"[s1]crop=720:{TOP_HEIGHT}:(iw-720)/2:(ih-1280)/2[top];"
-                f"[s2]crop=720:{BOTTOM_HEIGHT}:iw-720:ih-{BOTTOM_HEIGHT}[bottom];"
-                f"[top][bottom]vstack=inputs=2[out]"
-            )
-            cmd_crop = [
-                "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                "-i", temp_file,
-                "-filter_complex", vf,
-                "-map", "[out]", "-map", "0:a?",
-                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                "-c:a", "aac", "-b:a", "128k",
-                cropped_file
-            ]
-
-        print("  Cropping video...")
-        result = subprocess.run(
-            cmd_crop,
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-
-        os.remove(temp_file)
-
-        # Generate and burn subtitle if enabled
-        if use_subtitle:
-            print("  Generating subtitle...")
-            if generate_subtitle(cropped_file, subtitle_file):
-                print("  Burning subtitle to video...")
-                # Get absolute path for subtitle file
-                abs_subtitle_path = os.path.abspath(subtitle_file)
-                # Escape for FFmpeg: replace \ with / and escape special chars
-                subtitle_path = abs_subtitle_path.replace("\\", "/").replace(":", "\\:")
-                
-                cmd_subtitle = [
-                    "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
-                    "-i", cropped_file,
-                    "-vf", f"subtitles='{subtitle_path}':force_style='FontName=Arial,FontSize=12,Bold=1,PrimaryColour=&HFFFFFF,OutlineColour=&H000000,BorderStyle=1,Outline=2,Shadow=1,MarginV=100'",
-                    "-c:v", "libx264", "-preset", "ultrafast", "-crf", "26",
-                    "-c:a", "copy",
-                    output_file
-                ]
-                
-                result = subprocess.run(
-                    cmd_subtitle,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                
-                os.remove(cropped_file)
-                os.remove(subtitle_file)
-            else:
-                # If subtitle generation failed, use cropped file as output
-                print("  Subtitle generation failed, continuing without subtitle...")
-                os.rename(cropped_file, output_file)
-        else:
-            # No subtitle, rename cropped file to output
-            os.rename(cropped_file, output_file)
-
-        print("Clip successfully generated.")
-        return True
-
-    except subprocess.CalledProcessError as e:
-        # Cleanup temp files
-        for f in [temp_file, cropped_file, subtitle_file]:
-            if os.path.exists(f):
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
-
-        print(f"Failed to generate this clip.")
-        print(f"Error details: {e.stderr if e.stderr else e.stdout}")
-        return False
-    except Exception as e:
-        # Cleanup temp files
-        for f in [temp_file, cropped_file, subtitle_file]:
-            if os.path.exists(f):
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
-
-        print(f"Failed to generate this clip.")
-        print(f"Error: {str(e)}")
-        return False
-
-
-def main():
-    """
-    Main entry point of the application.
-    """
     # Select crop mode
     print("\n=== Crop Mode ===")
     print("1. Default (center crop)")
-    print("2. Split 1 (top: center, bottom: bottom-left (facecam))")
-    print("3. Split 2 (top: center, bottom: bottom-right ((facecam))")
+    print("2. Split 1 (top: center, bottom: bottom-left facecam)")
+    print("3. Split 2 (top: center, bottom: bottom-right facecam)")
     
     while True:
         choice = input("\nSelect crop mode (1-3): ").strip()
         if choice == "1":
-            crop_mode = "default"
-            crop_desc = "Default center crop"
+            crop_mode = CropMode.DEFAULT
             break
         elif choice == "2":
-            crop_mode = "split_left"
-            crop_desc = "Split crop (bottom-left facecam)"
+            crop_mode = CropMode.SPLIT_LEFT
             break
         elif choice == "3":
-            crop_mode = "split_right"
-            crop_desc = "Split crop (bottom-right facecam)"
+            crop_mode = CropMode.SPLIT_RIGHT
             break
         else:
             print("Invalid choice. Please enter 1, 2, or 3.")
     
-    print(f"Selected: {crop_desc}")
-    
     # Ask for subtitle
-    print("\n=== Auto Subtitle ===")
-    print(f"Available model: {WHISPER_MODEL} (~{get_model_size(WHISPER_MODEL)})")
-    subtitle_choice = input("Add auto subtitle using Faster-Whisper? (y/n): ").strip().lower()
+    print(f"\n=== Auto Subtitle ===")
+    print(f"Model: {config.WHISPER_MODEL} (~{get_model_size(config.WHISPER_MODEL)})")
+    subtitle_choice = input("Add auto subtitle? (y/n): ").strip().lower()
     use_subtitle = subtitle_choice in ["y", "yes"]
     
-    if use_subtitle:
-        print(f"✅ Subtitle enabled (Model: {WHISPER_MODEL}, Bahasa Indonesia)")
-    else:
-        print("❌ Subtitle disabled")
-    
-    print()
-    
     # Check dependencies
-    cek_dependensi(install_whisper=use_subtitle)
-
-    link = input("Link YT: ").strip()
-    video_id = extract_video_id(link)
-
-    if not video_id:
-        print("Invalid YouTube link.")
+    if not check_dependencies(install_whisper_pkg=use_subtitle):
         return
+    
+    # Get video URL
+    url = input("\nYouTube URL: ").strip()
+    
+    # Process video
+    success_count = process_video(url, crop_mode, use_subtitle)
+    
+    print(f"\n{'='*60}")
+    print(f"✅ Finished! {success_count} clips saved to '{config.OUTPUT_DIR}'")
+    print('='*60)
 
-    heatmap_data = ambil_most_replayed(video_id)
 
-    if not heatmap_data:
-        print("No high-engagement segments found.")
-        return
-
-    print(f"Found {len(heatmap_data)} high-engagement segments.")
-
-    total_duration = get_duration(video_id)
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-    print(
-        f"Processing clips with {PADDING}s pre-padding "
-        f"and {PADDING}s post-padding."
-    )
-    print(f"Using crop mode: {crop_desc}")
-
-    success_count = 0
-
-    for item in heatmap_data:
-        if success_count >= MAX_CLIPS:
-            break
-
-        if proses_satu_clip(
-            video_id,
-            item,
-            success_count + 1,
-            total_duration,
-            crop_mode,
-            use_subtitle
-        ):
-            success_count += 1
-
-    print(
-        f"Finished processing. "
-        f"{success_count} clip(s) successfully saved to '{OUTPUT_DIR}'."
-    )
+def main():
+    """
+    Main entry point.
+    """
+    # Check if running in CLI mode with arguments
+    if len(sys.argv) > 1:
+        # TODO: Add argparse for CLI arguments
+        # For now, just run interactive mode
+        pass
+    
+    # Run interactive mode
+    interactive_mode()
 
 
 if __name__ == "__main__":

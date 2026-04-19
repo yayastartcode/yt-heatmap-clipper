@@ -6,9 +6,13 @@ clips/
 *.mov
 
 # Temporary files
+temp/
 temp_*.mp4
 temp_*.srt
+temp_*.jpg
+temp_*.png
 temp_cropped_*.mp4
+temp_detection_frame.jpg
 
 # Python
 __pycache__/
@@ -59,3 +63,10 @@ models/
 # Test files
 test.py
 debug_*.py
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Jobs
+jobs/

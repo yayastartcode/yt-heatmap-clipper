@@ -1,0 +1,21 @@
+[Unit]
+Description=YT Heatmap Clipper API Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.openclaw/workspace/projects/yt-heatmap-clipper
+Environment="PATH=/usr/local/bin:/usr/bin:/bin"
+Environment="TELEGRAM_BOT_TOKEN=your_bot_token_here"
+ExecStart=/usr/bin/python3 worker.py --with-bot --host 0.0.0.0 --port 8000
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=yt-clipper
+
+[Install]
+WantedBy=multi-user.target

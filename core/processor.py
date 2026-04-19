@@ -1,0 +1,276 @@
+"""
+Video processor module
+Handles FFmpeg video processing, cropping, and effects
+"""
+import os
+import subprocess
+from enum import Enum
+from typing import Optional, Callable
+
+import config
+
+
+class CropMode(Enum):
+    """Video crop modes"""
+    DEFAULT = "default"
+    SPLIT_LEFT = "split_left"
+    SPLIT_RIGHT = "split_right"
+
+
+def process_clip(
+    input_file: str,
+    output_file: str,
+    crop_mode: CropMode = CropMode.DEFAULT,
+    subtitle_file: Optional[str] = None,
+    watermark_text: Optional[str] = None,
+    bgm_file: Optional[str] = None,
+    progress_callback: Optional[Callable] = None
+) -> bool:
+    """
+    Process video clip with cropping, subtitle, watermark, and BGM.
+    
+    Args:
+        input_file: Path to input video
+        output_file: Path to output video
+        crop_mode: Crop mode (default, split_left, split_right)
+        subtitle_file: Optional path to SRT subtitle file
+        watermark_text: Optional watermark text
+        bgm_file: Optional background music file
+        progress_callback: Optional callback for progress updates
+        
+    Returns:
+        True if successful, False otherwise
+    """
+    if progress_callback:
+        progress_callback(config.PROGRESS_CROP, 0, "Processing video")
+    
+    temp_cropped = input_file.replace(".mp4", "_cropped.mp4")
+    
+    # Step 1: Crop video
+    if not _crop_video(input_file, temp_cropped, crop_mode, progress_callback):
+        return False
+    
+    # Step 2: Add subtitle if provided
+    if subtitle_file and os.path.exists(subtitle_file):
+        temp_subtitled = temp_cropped.replace(".mp4", "_sub.mp4")
+        if not _add_subtitle(temp_cropped, temp_subtitled, subtitle_file, progress_callback):
+            _cleanup_temp_files([temp_cropped])
+            return False
+        os.remove(temp_cropped)
+        temp_cropped = temp_subtitled
+    
+    # Step 3: Add watermark if provided
+    if watermark_text and config.WATERMARK_ENABLED:
+        temp_watermarked = temp_cropped.replace(".mp4", "_wm.mp4")
+        if not _add_watermark(temp_cropped, temp_watermarked, watermark_text, progress_callback):
+            _cleanup_temp_files([temp_cropped])
+            return False
+        os.remove(temp_cropped)
+        temp_cropped = temp_watermarked
+    
+    # Step 4: Add background music if provided
+    if bgm_file and config.BGM_ENABLED and os.path.exists(bgm_file):
+        if not _add_bgm(temp_cropped, output_file, bgm_file, progress_callback):
+            _cleanup_temp_files([temp_cropped])
+            return False
+        os.remove(temp_cropped)
+    else:
+        # No BGM, just rename
+        os.rename(temp_cropped, output_file)
+    
+    if progress_callback:
+        progress_callback(config.PROGRESS_CROP, 100, "Video processing complete")
+    
+    return True
+
+
+def _crop_video(
+    input_file: str,
+    output_file: str,
+    crop_mode: CropMode,
+    progress_callback: Optional[Callable] = None
+) -> bool:
+    """Crop video based on crop mode"""
+    
+    if crop_mode == CropMode.DEFAULT:
+        # Standard center crop
+        vf = f"scale=-2:{config.VIDEO_HEIGHT},crop={config.VIDEO_WIDTH}:{config.VIDEO_HEIGHT}:(iw-{config.VIDEO_WIDTH})/2:(ih-{config.VIDEO_HEIGHT})/2"
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", input_file,
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+            "-c:a", "aac", "-b:a", config.AUDIO_BITRATE,
+            output_file
+        ]
+    
+    elif crop_mode == CropMode.SPLIT_LEFT:
+        # Split crop: top center + bottom left
+        vf = (
+            f"scale=-2:{config.VIDEO_HEIGHT}[scaled];"
+            f"[scaled]split=2[s1][s2];"
+            f"[s1]crop={config.VIDEO_WIDTH}:{config.TOP_HEIGHT}:(iw-{config.VIDEO_WIDTH})/2:(ih-{config.VIDEO_HEIGHT})/2[top];"
+            f"[s2]crop={config.VIDEO_WIDTH}:{config.BOTTOM_HEIGHT}:0:ih-{config.BOTTOM_HEIGHT}[bottom];"
+            f"[top][bottom]vstack=inputs=2[out]"
+        )
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", input_file,
+            "-filter_complex", vf,
+            "-map", "[out]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+            "-c:a", "aac", "-b:a", config.AUDIO_BITRATE,
+            output_file
+        ]
+    
+    elif crop_mode == CropMode.SPLIT_RIGHT:
+        # Split crop: top center + bottom right
+        vf = (
+            f"scale=-2:{config.VIDEO_HEIGHT}[scaled];"
+            f"[scaled]split=2[s1][s2];"
+            f"[s1]crop={config.VIDEO_WIDTH}:{config.TOP_HEIGHT}:(iw-{config.VIDEO_WIDTH})/2:(ih-{config.VIDEO_HEIGHT})/2[top];"
+            f"[s2]crop={config.VIDEO_WIDTH}:{config.BOTTOM_HEIGHT}:iw-{config.VIDEO_WIDTH}:ih-{config.BOTTOM_HEIGHT}[bottom];"
+            f"[top][bottom]vstack=inputs=2[out]"
+        )
+        cmd = [
+            "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+            "-i", input_file,
+            "-filter_complex", vf,
+            "-map", "[out]", "-map", "0:a?",
+            "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+            "-c:a", "aac", "-b:a", config.AUDIO_BITRATE,
+            output_file
+        ]
+    
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        if progress_callback:
+            progress_callback(config.PROGRESS_ERROR, 0, f"Crop failed: {e.stderr}")
+        return False
+
+
+def _add_subtitle(
+    input_file: str,
+    output_file: str,
+    subtitle_file: str,
+    progress_callback: Optional[Callable] = None
+) -> bool:
+    """Burn subtitle into video"""
+    
+    # Get absolute path and escape for FFmpeg
+    abs_subtitle_path = os.path.abspath(subtitle_file)
+    subtitle_path = abs_subtitle_path.replace("\\", "/").replace(":", "\\:")
+    
+    force_style = (
+        f"FontName={config.SUBTITLE_FONT},"
+        f"FontSize={config.SUBTITLE_FONTSIZE},"
+        f"Bold={config.SUBTITLE_BOLD},"
+        f"PrimaryColour={config.SUBTITLE_PRIMARY_COLOR},"
+        f"OutlineColour={config.SUBTITLE_OUTLINE_COLOR},"
+        f"BorderStyle=1,"
+        f"Outline={config.SUBTITLE_OUTLINE},"
+        f"Shadow={config.SUBTITLE_SHADOW},"
+        f"MarginV={config.SUBTITLE_MARGIN_V}"
+    )
+    
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", input_file,
+        "-vf", f"subtitles='{subtitle_path}':force_style='{force_style}'",
+        "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+        "-c:a", "copy",
+        output_file
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        if progress_callback:
+            progress_callback(config.PROGRESS_ERROR, 0, f"Subtitle failed: {e.stderr}")
+        return False
+
+
+def _add_watermark(
+    input_file: str,
+    output_file: str,
+    watermark_text: str,
+    progress_callback: Optional[Callable] = None
+) -> bool:
+    """Add text watermark to video"""
+    
+    # Position mapping
+    positions = {
+        "top-left": "x=10:y=10",
+        "top-right": "x=w-tw-10:y=10",
+        "bottom-left": "x=10:y=h-th-10",
+        "bottom-right": "x=w-tw-10:y=h-th-10"
+    }
+    
+    pos = positions.get(config.WATERMARK_POSITION, positions["bottom-right"])
+    
+    drawtext = (
+        f"drawtext=text='{watermark_text}':"
+        f"fontsize=24:fontcolor=white@{config.WATERMARK_OPACITY}:"
+        f"borderw=2:bordercolor=black@{config.WATERMARK_OPACITY}:"
+        f"{pos}"
+    )
+    
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", input_file,
+        "-vf", drawtext,
+        "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+        "-c:a", "copy",
+        output_file
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        if progress_callback:
+            progress_callback(config.PROGRESS_ERROR, 0, f"Watermark failed: {e.stderr}")
+        return False
+
+
+def _add_bgm(
+    input_file: str,
+    output_file: str,
+    bgm_file: str,
+    progress_callback: Optional[Callable] = None
+) -> bool:
+    """Add background music to video"""
+    
+    cmd = [
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", input_file,
+        "-i", bgm_file,
+        "-filter_complex",
+        f"[1:a]volume={config.BGM_VOLUME}[bgm];[0:a][bgm]amix=inputs=2:duration=shortest[aout]",
+        "-map", "0:v",
+        "-map", "[aout]",
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", config.AUDIO_BITRATE,
+        output_file
+    ]
+    
+    try:
+        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return True
+    except subprocess.CalledProcessError as e:
+        if progress_callback:
+            progress_callback(config.PROGRESS_ERROR, 0, f"BGM failed: {e.stderr}")
+        return False
+
+
+def _cleanup_temp_files(files: list):
+    """Clean up temporary files"""
+    for f in files:
+        if os.path.exists(f):
+            try:
+                os.remove(f)
+            except Exception:
+                pass
