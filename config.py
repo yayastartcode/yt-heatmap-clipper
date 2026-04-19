@@ -75,6 +75,17 @@ USER_AGENT = "Mozilla/5.0"
 CACHE_DIR = os.path.expanduser("~/.cache/yt-heatmap-clipper")
 MODEL_CACHE_DIR = os.path.expanduser("~/.cache/huggingface/hub")
 
+# Cookie support for yt-dlp
+COOKIES_FILE = "cookies.txt"
+
+# LLM settings for transcript analysis
+LLM_API_URL = os.environ.get("LLM_API_URL", "")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
+LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+
+# Transcript settings
+TRANSCRIPT_LANGUAGES = ["id", "en"]
+
 # Crop modes
 CROP_MODES = {
     "default": "Center crop (standard vertical video)",

@@ -60,12 +60,15 @@ async def batch_process_endpoint(
             # Create individual job for each URL
             job_data = {
                 "url": url,
+                "clip_mode": request.clip_mode,
                 "crop_mode": request.crop_mode,
                 "use_subtitle": request.use_subtitle,
                 "whisper_model": request.whisper_model,
                 "whisper_language": request.whisper_language,
                 "max_clips": request.max_clips,
-                "min_score": request.min_score
+                "min_score": request.min_score,
+                "manual_segments": request.manual_segments,
+                "split_count": request.split_count
             }
             
             job_id = await job_manager.create_job(job_data)

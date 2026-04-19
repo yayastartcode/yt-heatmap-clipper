@@ -2,7 +2,10 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import URLInput from '../components/URLInput';
+import ClipModeSelector from '../components/ClipModeSelector';
 import CropModeSelector from '../components/CropModeSelector';
+import ManualSegments from '../components/ManualSegments';
+import EvenSplitConfig from '../components/EvenSplitConfig';
 import SubtitleConfig from '../components/SubtitleConfig';
 import SettingsPanel from '../components/SettingsPanel';
 import { processVideo, batchProcess } from '../utils/api';
@@ -10,9 +13,13 @@ import { processVideo, batchProcess } from '../utils/api';
 export default function HomePage() {
   const navigate = useNavigate();
   const [urls, setUrls] = useState([]);
+  const [clipMode, setClipMode] = useState('heatmap');
   const [cropMode, setCropMode] = useState('center');
   const [subtitlesEnabled, setSubtitlesEnabled] = useState(true);
   const [modelSize, setModelSize] = useState('small');
+  const [manualSegments, setManualSegments] = useState([]);
+  const [splitCount, setSplitCount] = useState(5);
+  const [maxDuration, setMaxDuration] = useState(60);
   const [settings, setSettings] = useState({
     maxClips: 10,
     minScore: 0.4,
@@ -27,12 +34,21 @@ export default function HomePage() {
       toast.error('Please add at least one YouTube URL');
       return;
     }
+    
+    // Validate manual mode
+    if (clipMode === 'manual' && manualSegments.length === 0) {
+      toast.error('Please add at least one manual segment');
+      return;
+    }
 
     setProcessing(true);
     const options = {
+      clipMode,
       cropMode,
       subtitles: subtitlesEnabled,
       modelSize,
+      manualSegments: clipMode === 'manual' ? manualSegments : undefined,
+      splitCount: clipMode === 'even_split' ? splitCount : undefined,
       ...settings,
     };
 
@@ -67,6 +83,21 @@ export default function HomePage() {
 
       <div className="bg-slate-800/50 backdrop-blur border border-slate-700/50 rounded-2xl p-6 space-y-6">
         <URLInput urls={urls} onUrlsChange={setUrls} />
+
+        <ClipModeSelector selected={clipMode} onSelect={setClipMode} />
+        
+        {clipMode === 'manual' && (
+          <ManualSegments segments={manualSegments} onSegmentsChange={setManualSegments} />
+        )}
+        
+        {clipMode === 'even_split' && (
+          <EvenSplitConfig
+            splitCount={splitCount}
+            onSplitCountChange={setSplitCount}
+            maxDuration={maxDuration}
+            onMaxDurationChange={setMaxDuration}
+          />
+        )}
 
         <CropModeSelector selected={cropMode} onSelect={setCropMode} />
 

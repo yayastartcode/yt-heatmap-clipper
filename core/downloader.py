@@ -37,6 +37,15 @@ def download_video_segment(
         sys.executable, "-m", "yt_dlp",
         "--force-ipv4",
         "--quiet", "--no-warnings",
+        "--remote-components", "ejs:github",
+    ]
+    
+    # Add cookie file if it exists
+    cookies_path = getattr(config, 'COOKIES_FILE', 'cookies.txt')
+    if os.path.exists(cookies_path):
+        cmd.extend(["--cookies", cookies_path])
+    
+    cmd.extend([
         "--downloader", "ffmpeg",
         "--downloader-args",
         f"ffmpeg_i:-ss {start} -to {end} -hide_banner -loglevel error",
@@ -44,7 +53,7 @@ def download_video_segment(
         "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "-o", output_file,
         f"https://youtu.be/{video_id}"
-    ]
+    ])
 
     try:
         result = subprocess.run(

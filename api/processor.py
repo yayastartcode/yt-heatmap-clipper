@@ -19,6 +19,7 @@ try:
     from core.thumbnail import extract_thumbnail
     from core.detector import detect_facecam_position, suggest_crop_mode
     from core.ai import generate_title, generate_description
+    from core.transcript import fetch_captions, analyze_transcript_for_clips
     import config
     CORE_AVAILABLE = True
 except ImportError as e:
@@ -51,16 +52,19 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
         
         # Extract parameters
         url = job_data["url"]
+        clip_mode = job_data.get("clip_mode", "heatmap")
         crop_mode = job_data.get("crop_mode", "default")
         use_subtitle = job_data.get("use_subtitle", True)
         whisper_model = job_data.get("whisper_model", "small")
         whisper_language = job_data.get("whisper_language", "id")
         max_clips = job_data.get("max_clips", 10)
         min_score = job_data.get("min_score", 0.40)
+        manual_segments = job_data.get("manual_segments", [])
+        split_count = job_data.get("split_count", 5)
         
-        # Stage 1: Extract video ID and heatmap data
+        # Stage 1: Extract video ID
         await job_manager.update_job(job_id, {
-            "current_stage": "extracting_heatmap",
+            "current_stage": "extracting_video_info",
             "progress": 10.0
         })
         
@@ -68,20 +72,96 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
         if not video_id:
             raise Exception("Invalid YouTube URL")
         
-        heatmap_data = await asyncio.to_thread(
-            extract_heatmap_data,
-            video_id,
-            min_score
-        )
-        
-        if not heatmap_data:
-            raise Exception("No heatmap data found for this video")
-        
-        # Limit clips
-        heatmap_data = heatmap_data[:max_clips]
-        total_clips = len(heatmap_data)
-        
         total_duration = await asyncio.to_thread(get_video_duration, video_id)
+        
+        # Stage 2: Get segments based on clip_mode
+        await job_manager.update_job(job_id, {
+            "current_stage": f"detecting_segments_{clip_mode}",
+            "progress": 15.0
+        })
+        
+        segments = []
+        
+        if clip_mode == "heatmap":
+            # Original heatmap-based detection
+            heatmap_data = await asyncio.to_thread(
+                extract_heatmap_data,
+                video_id,
+                min_score
+            )
+            
+            if not heatmap_data:
+                raise Exception("No heatmap data found for this video")
+            
+            segments = heatmap_data[:max_clips]
+        
+        elif clip_mode == "transcript":
+            # Transcript-based AI detection
+            captions = await asyncio.to_thread(fetch_captions, video_id)
+            
+            if not captions:
+                raise Exception("No captions available for this video")
+            
+            transcript_clips = await asyncio.to_thread(
+                analyze_transcript_for_clips,
+                captions,
+                max_clips,
+                whisper_language
+            )
+            
+            if not transcript_clips:
+                raise Exception("Could not find interesting moments in transcript")
+            
+            # Convert transcript clips to segment format
+            segments = [
+                {
+                    "start": clip["start"],
+                    "duration": clip["duration"],
+                    "score": clip["score"],
+                    "reason": clip.get("reason", "Interesting moment")
+                }
+                for clip in transcript_clips
+            ]
+        
+        elif clip_mode == "manual":
+            # User-provided timestamps
+            if not manual_segments:
+                raise Exception("No manual segments provided")
+            
+            segments = [
+                {
+                    "start": seg["start"],
+                    "duration": seg["end"] - seg["start"],
+                    "score": 1.0,
+                    "reason": "Manual selection"
+                }
+                for seg in manual_segments
+            ]
+        
+        elif clip_mode == "even_split":
+            # Split video evenly
+            clip_duration = min(60, total_duration / split_count)
+            segments = []
+            
+            for i in range(split_count):
+                start = i * clip_duration
+                if start >= total_duration:
+                    break
+                
+                segments.append({
+                    "start": start,
+                    "duration": min(clip_duration, total_duration - start),
+                    "score": 1.0,
+                    "reason": f"Part {i+1} of {split_count}"
+                })
+        
+        else:
+            raise Exception(f"Unknown clip_mode: {clip_mode}")
+        
+        if not segments:
+            raise Exception("No segments to process")
+        
+        total_clips = len(segments)
         
         await job_manager.update_job(job_id, {
             "total_clips": total_clips,
@@ -104,8 +184,8 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
         }
         core_crop_mode = crop_mode_map.get(crop_mode, CropMode.DEFAULT)
         
-        # Stage 2: Process each clip
-        for idx, segment in enumerate(heatmap_data, 1):
+        # Stage 3: Process each clip
+        for idx, segment in enumerate(segments, 1):
             clip_progress = 20.0 + (70.0 * idx / total_clips)
             
             start = max(0, segment["start"] - config.PADDING)
@@ -197,8 +277,8 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
                 "filename": Path(cropped_file).name,
                 "thumbnail": thumbnail_name,
                 "duration": end - start,
-                "title": f"Clip {idx} - Viral Moment",
-                "description": f"High engagement segment ({segment['score']:.0%})",
+                "title": segment.get("reason", f"Clip {idx}"),
+                "description": f"Score: {segment['score']:.0%}",
                 "start_time": segment["start"],
                 "end_time": segment["start"] + segment["duration"],
                 "score": segment["score"]
@@ -206,7 +286,7 @@ async def process_video(job_id: str, job_data: Dict[str, Any]):
             
             await job_manager.add_clip(job_id, clip_info)
         
-        # Stage 3: Complete
+        # Stage 4: Complete
         await job_manager.update_job(job_id, {
             "status": JobStatus.COMPLETED,
             "current_stage": "completed",

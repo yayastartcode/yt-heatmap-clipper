@@ -8,8 +8,9 @@ const CROP_MODE_MAP = {
 };
 
 function buildApiPayload(url, options) {
-  return {
+  const payload = {
     url,
+    clip_mode: options.clipMode || 'heatmap',
     crop_mode: CROP_MODE_MAP[options.cropMode] || 'none',
     use_subtitle: options.subtitles ?? true,
     whisper_model: options.modelSize || 'small',
@@ -17,6 +18,17 @@ function buildApiPayload(url, options) {
     max_clips: options.maxClips || 10,
     min_score: options.minScore || 0.4,
   };
+  
+  // Add optional fields
+  if (options.manualSegments) {
+    payload.manual_segments = options.manualSegments;
+  }
+  
+  if (options.splitCount) {
+    payload.split_count = options.splitCount;
+  }
+  
+  return payload;
 }
 
 export const processVideo = async (url, options) => {
@@ -52,6 +64,7 @@ export const downloadClip = (jobId, filename) => {
 export const batchProcess = async (urls, options) => {
   const payload = {
     urls,
+    clip_mode: options.clipMode || 'heatmap',
     crop_mode: CROP_MODE_MAP[options.cropMode] || 'none',
     use_subtitle: options.subtitles ?? true,
     whisper_model: options.modelSize || 'small',
@@ -59,6 +72,16 @@ export const batchProcess = async (urls, options) => {
     max_clips: options.maxClips || 10,
     min_score: options.minScore || 0.4,
   };
+  
+  // Add optional fields
+  if (options.manualSegments) {
+    payload.manual_segments = options.manualSegments;
+  }
+  
+  if (options.splitCount) {
+    payload.split_count = options.splitCount;
+  }
+  
   const response = await fetch(`${API_BASE}/batch`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

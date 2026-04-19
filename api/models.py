@@ -16,6 +16,14 @@ class CropMode(str, Enum):
     AUTO = "auto"
 
 
+class ClipMode(str, Enum):
+    """Clip detection modes"""
+    HEATMAP = "heatmap"
+    TRANSCRIPT = "transcript"
+    MANUAL = "manual"
+    EVEN_SPLIT = "even_split"
+
+
 class WhisperModel(str, Enum):
     """Whisper model sizes"""
     TINY = "tiny"
@@ -33,26 +41,38 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
+class ManualSegment(BaseModel):
+    """Manual timestamp segment"""
+    start: float = Field(..., description="Start time in seconds")
+    end: float = Field(..., description="End time in seconds")
+
+
 class JobRequest(BaseModel):
     """Request to process a video"""
     url: str = Field(..., description="YouTube video URL")
+    clip_mode: ClipMode = Field(default=ClipMode.HEATMAP, description="Clip detection mode")
     crop_mode: CropMode = Field(default=CropMode.NONE, description="Video crop mode")
     use_subtitle: bool = Field(default=True, description="Generate subtitles")
     whisper_model: WhisperModel = Field(default=WhisperModel.SMALL, description="Whisper model size")
     whisper_language: str = Field(default="id", description="Subtitle language code")
     max_clips: int = Field(default=10, description="Maximum clips to generate")
     min_score: float = Field(default=0.40, description="Minimum heatmap score")
+    manual_segments: Optional[List[ManualSegment]] = Field(default=None, description="Manual timestamp segments")
+    split_count: Optional[int] = Field(default=5, description="Number of clips for even_split mode")
 
 
 class BatchJobRequest(BaseModel):
     """Request to process multiple videos"""
     urls: List[str] = Field(..., description="List of YouTube URLs")
+    clip_mode: ClipMode = Field(default=ClipMode.HEATMAP)
     crop_mode: CropMode = Field(default=CropMode.NONE)
     use_subtitle: bool = Field(default=True)
     whisper_model: WhisperModel = Field(default=WhisperModel.SMALL)
     whisper_language: str = Field(default="id")
     max_clips: int = Field(default=10)
     min_score: float = Field(default=0.40)
+    manual_segments: Optional[List[ManualSegment]] = Field(default=None)
+    split_count: Optional[int] = Field(default=5)
 
 
 class ClipInfo(BaseModel):
