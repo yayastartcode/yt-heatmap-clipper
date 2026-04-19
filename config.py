@@ -25,6 +25,22 @@ FFMPEG_PRESET = "ultrafast"
 FFMPEG_CRF = 26
 AUDIO_BITRATE = "128k"
 
+# Quality presets
+QUALITY_PRESETS = {
+    "fast": {"preset": "ultrafast", "crf": 28},
+    "balanced": {"preset": "medium", "crf": 23},
+    "quality": {"preset": "slow", "crf": 18}
+}
+
+# Resolution options
+RESOLUTION_PRESETS = {
+    "720p": {"width": 720, "height": 1280},
+    "1080p": {"width": 1080, "height": 1920}
+}
+
+# Output format options
+OUTPUT_FORMATS = ["mp4", "webm"]
+
 # Subtitle settings
 USE_SUBTITLE = True
 WHISPER_MODEL = "small"   # tiny, base, small, medium, large
@@ -71,6 +87,11 @@ BGM_VOLUME = 0.3
 REQUEST_TIMEOUT = 20
 USER_AGENT = "Mozilla/5.0"
 
+# Retry settings
+MAX_RETRIES = 3
+RETRY_DELAY = 2  # seconds
+RETRY_BACKOFF = 2  # exponential backoff multiplier
+
 # Cache settings
 CACHE_DIR = os.path.expanduser("~/.cache/yt-heatmap-clipper")
 MODEL_CACHE_DIR = os.path.expanduser("~/.cache/huggingface/hub")
@@ -78,10 +99,21 @@ MODEL_CACHE_DIR = os.path.expanduser("~/.cache/huggingface/hub")
 # Cookie support for yt-dlp
 COOKIES_FILE = "cookies.txt"
 
-# LLM settings for transcript analysis
-LLM_API_URL = os.environ.get("LLM_API_URL", "")
-LLM_API_KEY = os.environ.get("LLM_API_KEY", "")
-LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
+# YouTube download strategies (in order of preference)
+YT_DOWNLOAD_STRATEGIES = [
+    "cookies_deno",      # With cookies + deno JS runtime
+    "cookies_only",      # With cookies only
+    "no_cookies",        # Without cookies
+    "tv_client"          # TV client extractor
+]
+
+# Deno path for yt-dlp
+DENO_PATH = "/usr/local/bin/deno"
+
+# LLM settings for transcript analysis (enowxai proxy)
+LLM_API_URL = os.environ.get("LLM_API_URL", "http://localhost:1430/v1/chat/completions")
+LLM_API_KEY = os.environ.get("LLM_API_KEY", "ENOWX-1PI6A-4M5MB-B8TU6-GSAM2")
+LLM_MODEL = os.environ.get("LLM_MODEL", "claude-sonnet-4")
 
 # Transcript settings
 TRANSCRIPT_LANGUAGES = ["id", "en"]
@@ -99,3 +131,17 @@ PROGRESS_CROP = "crop"
 PROGRESS_SUBTITLE = "subtitle"
 PROGRESS_COMPLETE = "complete"
 PROGRESS_ERROR = "error"
+
+# Cleanup settings
+MAX_JOB_AGE_HOURS = 24  # Auto-delete jobs older than this
+MAX_DISK_USAGE_GB = 10  # Max disk space for clips
+CLEANUP_INTERVAL_MINUTES = 60  # How often to run cleanup
+
+# Error types for better error handling
+ERROR_BOT_DETECTION = "bot_detection"
+ERROR_NOT_FOUND = "not_found"
+ERROR_PRIVATE = "private"
+ERROR_AGE_RESTRICTED = "age_restricted"
+ERROR_NETWORK = "network"
+ERROR_TIMEOUT = "timeout"
+ERROR_UNKNOWN = "unknown"

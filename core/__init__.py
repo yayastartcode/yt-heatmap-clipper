@@ -9,7 +9,7 @@ from .processor import process_clip, CropMode
 from .subtitle import generate_subtitle, format_timestamp
 from .thumbnail import extract_thumbnail
 from .detector import detect_facecam_position, suggest_crop_mode
-from .ai import generate_title, generate_description, analyze_transcript
+from .ai import generate_title, generate_description
 
 __all__ = [
     'extract_video_id',
@@ -24,6 +24,5 @@ __all__ = [
     'detect_facecam_position',
     'suggest_crop_mode',
     'generate_title',
-    'generate_description',
-    'analyze_transcript'
+    'generate_description'
 ]

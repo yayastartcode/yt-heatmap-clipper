@@ -24,6 +24,9 @@ def process_clip(
     subtitle_file: Optional[str] = None,
     watermark_text: Optional[str] = None,
     bgm_file: Optional[str] = None,
+    quality_preset: str = "balanced",
+    resolution: str = "720p",
+    output_format: str = "mp4",
     progress_callback: Optional[Callable] = None
 ) -> bool:
     """
@@ -36,6 +39,9 @@ def process_clip(
         subtitle_file: Optional path to SRT subtitle file
         watermark_text: Optional watermark text
         bgm_file: Optional background music file
+        quality_preset: Quality preset (fast, balanced, quality)
+        resolution: Resolution preset (720p, 1080p)
+        output_format: Output format (mp4, webm)
         progress_callback: Optional callback for progress updates
         
     Returns:
@@ -46,14 +52,18 @@ def process_clip(
     
     temp_cropped = input_file.replace(".mp4", "_cropped.mp4")
     
+    # Get quality and resolution settings
+    quality_settings = config.QUALITY_PRESETS.get(quality_preset, config.QUALITY_PRESETS["balanced"])
+    resolution_settings = config.RESOLUTION_PRESETS.get(resolution, config.RESOLUTION_PRESETS["720p"])
+    
     # Step 1: Crop video
-    if not _crop_video(input_file, temp_cropped, crop_mode, progress_callback):
+    if not _crop_video(input_file, temp_cropped, crop_mode, quality_settings, resolution_settings, progress_callback):
         return False
     
     # Step 2: Add subtitle if provided
     if subtitle_file and os.path.exists(subtitle_file):
         temp_subtitled = temp_cropped.replace(".mp4", "_sub.mp4")
-        if not _add_subtitle(temp_cropped, temp_subtitled, subtitle_file, progress_callback):
+        if not _add_subtitle(temp_cropped, temp_subtitled, subtitle_file, quality_settings, resolution_settings, progress_callback):
             _cleanup_temp_files([temp_cropped])
             return False
         os.remove(temp_cropped)
@@ -88,29 +98,38 @@ def _crop_video(
     input_file: str,
     output_file: str,
     crop_mode: CropMode,
+    quality_settings: dict,
+    resolution_settings: dict,
     progress_callback: Optional[Callable] = None
 ) -> bool:
-    """Crop video based on crop mode"""
+    """Crop video based on crop mode with quality and resolution settings"""
+    
+    video_width = resolution_settings["width"]
+    video_height = resolution_settings["height"]
+    preset = quality_settings["preset"]
+    crf = quality_settings["crf"]
     
     if crop_mode == CropMode.DEFAULT:
         # Standard center crop
-        vf = f"scale=-2:{config.VIDEO_HEIGHT},crop={config.VIDEO_WIDTH}:{config.VIDEO_HEIGHT}:(iw-{config.VIDEO_WIDTH})/2:(ih-{config.VIDEO_HEIGHT})/2"
+        vf = f"scale=-2:{video_height},crop={video_width}:{video_height}:(iw-{video_width})/2:(ih-{video_height})/2"
         cmd = [
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-i", input_file,
             "-vf", vf,
-            "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+            "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
             "-c:a", "aac", "-b:a", config.AUDIO_BITRATE,
             output_file
         ]
     
     elif crop_mode == CropMode.SPLIT_LEFT:
         # Split crop: top center + bottom left
+        top_height = int(video_height * 0.75)
+        bottom_height = video_height - top_height
         vf = (
-            f"scale=-2:{config.VIDEO_HEIGHT}[scaled];"
+            f"scale=-2:{video_height}[scaled];"
             f"[scaled]split=2[s1][s2];"
-            f"[s1]crop={config.VIDEO_WIDTH}:{config.TOP_HEIGHT}:(iw-{config.VIDEO_WIDTH})/2:(ih-{config.VIDEO_HEIGHT})/2[top];"
-            f"[s2]crop={config.VIDEO_WIDTH}:{config.BOTTOM_HEIGHT}:0:ih-{config.BOTTOM_HEIGHT}[bottom];"
+            f"[s1]crop={video_width}:{top_height}:(iw-{video_width})/2:(ih-{video_height})/2[top];"
+            f"[s2]crop={video_width}:{bottom_height}:0:ih-{bottom_height}[bottom];"
             f"[top][bottom]vstack=inputs=2[out]"
         )
         cmd = [
@@ -118,18 +137,20 @@ def _crop_video(
             "-i", input_file,
             "-filter_complex", vf,
             "-map", "[out]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+            "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
             "-c:a", "aac", "-b:a", config.AUDIO_BITRATE,
             output_file
         ]
     
     elif crop_mode == CropMode.SPLIT_RIGHT:
         # Split crop: top center + bottom right
+        top_height = int(video_height * 0.75)
+        bottom_height = video_height - top_height
         vf = (
-            f"scale=-2:{config.VIDEO_HEIGHT}[scaled];"
+            f"scale=-2:{video_height}[scaled];"
             f"[scaled]split=2[s1][s2];"
-            f"[s1]crop={config.VIDEO_WIDTH}:{config.TOP_HEIGHT}:(iw-{config.VIDEO_WIDTH})/2:(ih-{config.VIDEO_HEIGHT})/2[top];"
-            f"[s2]crop={config.VIDEO_WIDTH}:{config.BOTTOM_HEIGHT}:iw-{config.VIDEO_WIDTH}:ih-{config.BOTTOM_HEIGHT}[bottom];"
+            f"[s1]crop={video_width}:{top_height}:(iw-{video_width})/2:(ih-{video_height})/2[top];"
+            f"[s2]crop={video_width}:{bottom_height}:iw-{video_width}:ih-{bottom_height}[bottom];"
             f"[top][bottom]vstack=inputs=2[out]"
         )
         cmd = [
@@ -137,7 +158,7 @@ def _crop_video(
             "-i", input_file,
             "-filter_complex", vf,
             "-map", "[out]", "-map", "0:a?",
-            "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+            "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
             "-c:a", "aac", "-b:a", config.AUDIO_BITRATE,
             output_file
         ]
@@ -155,31 +176,42 @@ def _add_subtitle(
     input_file: str,
     output_file: str,
     subtitle_file: str,
+    quality_settings: dict,
+    resolution_settings: dict,
     progress_callback: Optional[Callable] = None
 ) -> bool:
-    """Burn subtitle into video"""
+    """Burn subtitle into video with improved styling"""
+    
+    preset = quality_settings["preset"]
+    crf = quality_settings["crf"]
+    video_width = resolution_settings["width"]
+    
+    # Scale font size based on resolution
+    font_size = 18 if video_width >= 1080 else 14
     
     # Get absolute path and escape for FFmpeg
     abs_subtitle_path = os.path.abspath(subtitle_file)
     subtitle_path = abs_subtitle_path.replace("\\", "/").replace(":", "\\:")
     
+    # Improved subtitle styling - larger, more readable
     force_style = (
         f"FontName={config.SUBTITLE_FONT},"
-        f"FontSize={config.SUBTITLE_FONTSIZE},"
+        f"FontSize={font_size},"
         f"Bold={config.SUBTITLE_BOLD},"
         f"PrimaryColour={config.SUBTITLE_PRIMARY_COLOR},"
         f"OutlineColour={config.SUBTITLE_OUTLINE_COLOR},"
-        f"BorderStyle=1,"
-        f"Outline={config.SUBTITLE_OUTLINE},"
-        f"Shadow={config.SUBTITLE_SHADOW},"
-        f"MarginV={config.SUBTITLE_MARGIN_V}"
+        f"BorderStyle=3,"  # Box background
+        f"Outline=3,"  # Thicker outline
+        f"Shadow=2,"
+        f"MarginV={config.SUBTITLE_MARGIN_V},"
+        f"Alignment=2"  # Bottom center
     )
     
     cmd = [
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-i", input_file,
         "-vf", f"subtitles='{subtitle_path}':force_style='{force_style}'",
-        "-c:v", "libx264", "-preset", config.FFMPEG_PRESET, "-crf", str(config.FFMPEG_CRF),
+        "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
         "-c:a", "copy",
         output_file
     ]

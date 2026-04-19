@@ -93,3 +93,61 @@ export const batchProcess = async (urls, options) => {
   }
   return response.json();
 };
+
+export const getVideoInfo = async (url) => {
+  try {
+    const response = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+    if (!response.ok) throw new Error('Failed to fetch video info');
+    return response.json();
+  } catch (err) {
+    console.error('Video info fetch error:', err);
+    return null;
+  }
+};
+
+export const uploadCookies = async (file) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await fetch(`${API_BASE}/upload-cookies`, {
+    method: 'POST',
+    body: formData
+  });
+  if (!response.ok) throw new Error('Failed to upload cookies');
+  return response.json();
+};
+
+export const cancelJob = async (jobId) => {
+  const response = await fetch(`${API_BASE}/cancel/${jobId}`, { method: 'POST' });
+  if (!response.ok) throw new Error('Failed to cancel job');
+  return response.json();
+};
+
+export const retryJob = async (jobId) => {
+  const response = await fetch(`${API_BASE}/retry/${jobId}`, { method: 'POST' });
+  if (!response.ok) throw new Error('Failed to retry job');
+  return response.json();
+};
+
+export const downloadAll = (jobId) => `${API_BASE}/download-all/${jobId}`;
+
+export const getHealth = async () => {
+  const response = await fetch(`${API_BASE}/health`);
+  if (!response.ok) throw new Error('Failed to get health status');
+  return response.json();
+};
+
+export const deleteJob = async (jobId) => {
+  const response = await fetch(`${API_BASE}/job/${jobId}`, { method: 'DELETE' });
+  if (!response.ok) throw new Error('Failed to delete job');
+  return response.json();
+};
+
+export const getHistory = async () => {
+  const response = await fetch(`${API_BASE}/jobs`);
+  if (!response.ok) throw new Error('Failed to get history');
+  return response.json();
+};
+
+export const getThumbnail = (jobId, filename) => {
+  return `${API_BASE}/thumbnail/${jobId}/${filename}`;
+};
